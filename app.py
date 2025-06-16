@@ -16,6 +16,7 @@ from model_utils import (
 )
 from deepseek_utils import answer_prediction_query  # Placeholder for Huggingface/DeepSeek
 from utils import load_latest_model_id, save_latest_model_id
+from tapas_utils import answer_table_question  # Placeholder for TAPAS
 
 UPLOAD_FOLDER = 'uploads'
 MODEL_FOLDER = 'models'
@@ -160,6 +161,31 @@ def deepseek():
     # Only allow queries about the prediction
     nlp_answer = answer_prediction_query(query, model_bundle)
     return jsonify({'answer': nlp_answer})
+
+@app.route('/tapas', methods=['POST'])
+def tapas():
+    # Expect: model_id, query (about prediction)
+    data = request.form if request.form else request.json
+    model_id = data.get('model_id')
+    query = data.get('query', '')
+
+    if not query:
+        return jsonify({'error': 'No query provided'}), 400
+
+    # If no model_id provided, load latest
+    if not model_id:
+        model_id = load_latest_model_id()
+        if not model_id:
+            return jsonify({'error': 'No model_id provided and no latest model found'}), 400
+
+    model_path = get_model_path(app.config['MODEL_FOLDER'], model_id)
+    if not os.path.exists(model_path):
+        return jsonify({'error': 'Model not found'}), 404
+
+    model_bundle = joblib.load(model_path)
+    # Use TAPAS for table QA
+    answer = answer_table_question(query, model_bundle)
+    return jsonify({'answer': answer})
 
 @app.route('/latest_model', methods=['GET'])
 def latest_model():
