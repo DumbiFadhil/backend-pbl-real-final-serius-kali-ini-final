@@ -5,22 +5,17 @@ import re
 from datetime import datetime, timedelta
 import joblib
 
-load_dotenv()
-
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
-DEEPSEEK_MODEL = "deepseek-chat"   # or another model supported by DeepSeek
-
 def strip_think_tags(response: str) -> str:
     """
     Removes <think>...</think> blocks from the LLM response, including any whitespace after.
     """
     return re.sub(r"<think>.*?</think>\s*", "", response, flags=re.DOTALL)
 
+load_dotenv()
 
-# HF_TOKEN = os.environ.get("HF_TOKEN")
-# DEEPSEEK_URL = "https://router.huggingface.co/sambanova/v1/chat/completions"
-# DEEPSEEK_MODEL = "DeepSeek-R1-0528"
+HF_TOKEN = os.environ.get("HF_TOKEN")
+DEEPSEEK_URL = "https://router.huggingface.co/sambanova/v1/chat/completions"
+DEEPSEEK_MODEL = "DeepSeek-R1-0528"
 
 def _parse_query_for_filters(query):
     """
@@ -138,8 +133,8 @@ def answer_prediction_query(query: str, model_bundle: dict) -> str:
     Filters and aggregates forecast data based on the query,
     then sends the summary and context to DeepSeek for business recommendations/explanation.
     """
-    if not DEEPSEEK_API_KEY:
-        return "DeepSeek API token (DEEPSEEK_API_KEY) is not set."
+    if not HF_TOKEN:
+        return "Huggingface API token (HF_TOKEN) is not set."
 
     forecast_data = model_bundle.get("last_forecast")
     if not forecast_data:
@@ -190,7 +185,7 @@ def answer_prediction_query(query: str, model_bundle: dict) -> str:
         "stream": False
     }
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json"
     }
     try:
