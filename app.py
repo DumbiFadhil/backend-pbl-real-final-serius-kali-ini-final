@@ -116,6 +116,8 @@ def forecast():
             family_col=model_bundle['family_col'],
             lag_days=model_bundle['lag_days']
         )
+        model_bundle["last_forecast"] = forecast_df.to_dict(orient='records')
+        joblib.dump(model_bundle, model_path)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
