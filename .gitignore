@@ -4,3 +4,4 @@ venv/
 uploads/
 
 .env
+latest_model_id.txt

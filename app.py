@@ -15,6 +15,7 @@ from model_utils import (
     load_xgboost_pipeline
 )
 from deepseek_utils import answer_prediction_query  # Placeholder for Huggingface/DeepSeek
+from utils import load_latest_model_id, save_latest_model_id
 
 UPLOAD_FOLDER = 'uploads'
 MODEL_FOLDER = 'models'
@@ -80,6 +81,8 @@ def train():
         'last_df_lag': last_df_lag
     }, model_path)
 
+    save_latest_model_id(model_id)
+
     return jsonify({
         'message': 'Model trained and saved',
         'model_id': model_id,
@@ -94,6 +97,12 @@ def forecast():
     data = request.form if request.form else request.json
     model_id = data.get('model_id')
     n_weeks = int(data.get('n_weeks', 2))
+
+        # If no model_id provided, load latest
+    if not model_id:
+        model_id = load_latest_model_id()
+        if not model_id:
+            return jsonify({'error': 'No model_id provided and no latest model found'}), 400
 
     model_path = get_model_path(app.config['MODEL_FOLDER'], model_id)
     if not os.path.exists(model_path):
@@ -136,6 +145,12 @@ def deepseek():
 
     if not query:
         return jsonify({'error': 'No query provided'}), 400
+    
+    # If no model_id provided, load latest
+    if not model_id:
+        model_id = load_latest_model_id()
+        if not model_id:
+            return jsonify({'error': 'No model_id provided and no latest model found'}), 400
 
     model_path = get_model_path(app.config['MODEL_FOLDER'], model_id)
     if not os.path.exists(model_path):
@@ -146,6 +161,12 @@ def deepseek():
     nlp_answer = answer_prediction_query(query, model_bundle)
     return jsonify({'answer': nlp_answer})
 
+@app.route('/latest_model', methods=['GET'])
+def latest_model():
+    model_id = load_latest_model_id()
+    if not model_id:
+        return jsonify({'error': 'No latest model found'}), 404
+    return jsonify({'latest_model_id': model_id})
 
 if __name__ == '__main__':
     app.run(debug=True)

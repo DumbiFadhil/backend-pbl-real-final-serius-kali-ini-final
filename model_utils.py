@@ -106,7 +106,7 @@ def train_xgboost_model(
         ]
     )
 
-    xgb = XGBRegressor(objective='reg:squarederror', random_state=42)
+    xgb = XGBRegressor(objective='reg:squarederror', random_state=42, n_jobs=2)
     param_distributions = {
         'n_estimators': [100, 200, 300],
         'max_depth': [3, 5, 6, 8],
@@ -121,7 +121,7 @@ def train_xgboost_model(
         ('preprocessor', preprocessor),
         ('regressor', RandomizedSearchCV(
             xgb, param_distributions, n_iter=10, scoring='neg_mean_squared_error',
-            cv=3, verbose=0, n_jobs=-1, random_state=42))
+            cv=3, verbose=0, n_jobs=2, random_state=42))
     ])
     model.fit(X_train, y_train)
     predictions = model.predict(X_test)

@@ -22,3 +22,14 @@ def compute_error(y_true, y_pred):
     mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
     r2 = r2_score(y_true, y_pred)
     return rmse, corr, mae, rae, rrse, mape, r2
+
+def save_latest_model_id(model_id, path="latest_model_id.txt"):
+    with open(path, "w") as f:
+        f.write(model_id)
+
+def load_latest_model_id(path="latest_model_id.txt"):
+    try:
+        with open(path, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return None
