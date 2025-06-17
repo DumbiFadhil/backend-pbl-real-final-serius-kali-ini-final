@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
+from llm_utils import run_secure_qa_on_forecast
 
 from model_utils import (
     train_xgboost_model,
@@ -269,6 +270,9 @@ def stock_recommendation():
                     "restock_recommendation_percent": int(round(growth * 100)),
                 })
 
+        model_bundle["restock_df"] = recommendations
+        joblib.dump(model_bundle, model_path)
+
         return jsonify({
             "total_recommendations": len(recommendations),
             "recommendations": recommendations
@@ -276,6 +280,97 @@ def stock_recommendation():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/qa", methods=["POST"])
+def qa():
+    data = request.form if request.form else request.json
+    model_id = data.get("model_id")
+    question = data.get("question")
+    response_format = data.get("format", "records").lower()  # "summary" or "records"
+
+    if not question:
+        return jsonify({"error": "Missing question"}), 400
+
+    if not model_id:
+        model_id = load_latest_model_id()
+        if not model_id:
+            return jsonify({"error": "No model_id provided and no latest model found"}), 400
+
+    model_path = get_model_path(app.config["MODEL_FOLDER"], model_id)
+    if not os.path.exists(model_path):
+        return jsonify({"error": "Model not found"}), 404
+
+    model_bundle = joblib.load(model_path)
+
+    # Decide which dataset to query
+    if "restock" in question.lower() or "growth" in question.lower():
+        raw_data = model_bundle.get("restock_df")
+        if not raw_data:
+            return jsonify({"error": "No restock data found. Please run /stock_recommendation first."}), 400
+        df_to_query = pd.DataFrame(raw_data)
+    else:
+        raw_data = model_bundle.get("last_forecast")
+        if not raw_data:
+            return jsonify({"error": "No forecast data found. Please run /forecast first."}), 400
+        df_to_query = pd.DataFrame(raw_data)
+
+    if df_to_query.empty:
+        return jsonify({
+            "question": question,
+            "answer": "Sorry, the dataset is empty. Please check your forecast or stock data.",
+            "llm_raw_response": None
+        })
+
+    try:
+        answer, raw_llm = run_secure_qa_on_forecast(df_to_query, question)
+
+        # 🛡️ Defensive handling if LLM fails or returns string
+        if not isinstance(answer, pd.DataFrame):
+            # Attempt to convert from list of dicts or fallback
+            if isinstance(answer, list):
+                answer = pd.DataFrame(answer)
+            else:
+                return jsonify({
+                    "question": question,
+                    "answer": "Sorry, the model could not generate a valid result.",
+                    "llm_raw_response": raw_llm
+                })
+
+        # ✅ If user wants summary
+        if response_format == "summary":
+            if answer.empty:
+                return jsonify({
+                    "question": question,
+                    "summary": "No items meet the restock criteria at this time.",
+                    "llm_raw_response": raw_llm,
+                    "data": []
+                })
+
+            # ✅ Safely build the summary
+            summary_parts = []
+            for _, row in answer.head(3).iterrows():
+                store = row.get("store_nbr", "unknown store")
+                family = row.get("family", "unknown item")
+                summary_parts.append(f"{family} (Store {store})")
+
+            summary_text = "You should restock " + ", ".join(summary_parts) + " due to high growth."
+
+            return jsonify({
+                "question": question,
+                "summary": summary_text,
+                "llm_raw_response": raw_llm,
+                "data": answer.to_dict(orient="records")
+            })
+
+        # ✅ Default: full JSON result
+        return jsonify({
+            "question": question,
+            "answer": answer.to_dict(orient="records"),
+            "llm_raw_response": raw_llm
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Secure QA failed: {str(e)}"}), 500
 
 @app.route('/latest_model', methods=['GET'])
 def latest_model():

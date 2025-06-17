@@ -9,3 +9,6 @@ requests
 python-dotenv
 transformers
 torch
+pandasai
+langchain
+openai
