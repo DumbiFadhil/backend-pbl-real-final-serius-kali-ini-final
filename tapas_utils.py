@@ -1,41 +1,27 @@
-import pandas as pd
 from transformers import TapasTokenizer, TapasForQuestionAnswering
+import torch
+import pandas as pd
 
-# Load model and tokenizer once at module level
-MODEL_NAME = "google/tapas-base-finetuned-wtq"
-tokenizer = TapasTokenizer.from_pretrained(MODEL_NAME)
-model = TapasForQuestionAnswering.from_pretrained(MODEL_NAME)
+# Load model and tokenizer once
+tokenizer = TapasTokenizer.from_pretrained("google/tapas-large-finetuned-wtq")
+model = TapasForQuestionAnswering.from_pretrained("google/tapas-large-finetuned-wtq")
 
-def answer_table_question(query: str, model_bundle: dict) -> str:
+def answer_table_question(table, query):
     """
-    Answers a question about the last forecast table using TAPAS.
+    Process a question on a given Pandas DataFrame table using TAPAS.
     """
-    forecast_data = model_bundle.get("last_forecast")
-    if not forecast_data:
-        return "No forecast data available. Please run a forecast first."
+    inputs = tokenizer(table=table, queries=[query], return_tensors="pt")
+    with torch.no_grad():
+        outputs = model(**inputs)
 
-    # Convert to DataFrame, keeping only relevant columns for TAPAS
-    df = pd.DataFrame(forecast_data)
-    # Optionally, keep only a subset if the table is too large for TAPAS
-    if len(df) > 40:
-        df = df.head(40)
-
-    # TAPAS can handle only string columns and limited numerics
-    for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].astype(str)
-    queries = [query]
-    inputs = tokenizer(table=df, queries=queries, padding="max_length", return_tensors="pt")
-    outputs = model(**inputs)
-    predicted_answer_coordinates, predicted_aggregation_indices = tokenizer.convert_logits_to_predictions(
-        inputs, outputs.logits.detach(), outputs.aggregation_logits.detach()
+    predicted_answer_coordinates, _ = tokenizer.convert_logits_to_predictions(
+        inputs,
+        outputs.logits.detach(),
+        outputs.logits_aggregation.detach()
     )
-    # Extract answers
-    answers = []
-    for coordinates in predicted_answer_coordinates:
-        if not coordinates:
-            answers.append("No answer found.")
-        else:
-            cell_values = [df.iat[row, column] for row, column in coordinates]
-            answers.append(", ".join(map(str, cell_values)))
-    return answers[0]
+
+    if predicted_answer_coordinates[0]:
+        answers = [table.iat[coord] for coord in predicted_answer_coordinates[0]]
+        return answers
+    else:
+        return ["No answer"]

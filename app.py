@@ -162,15 +162,10 @@ def deepseek():
     nlp_answer = answer_prediction_query(query, model_bundle)
     return jsonify({'answer': nlp_answer})
 
-@app.route('/tapas', methods=['POST'])
+@app.route("/tapas", methods=["POST"])
 def tapas():
-    # Expect: model_id, query (about prediction)
     data = request.form if request.form else request.json
     model_id = data.get('model_id')
-    query = data.get('query', '')
-
-    if not query:
-        return jsonify({'error': 'No query provided'}), 400
 
     # If no model_id provided, load latest
     if not model_id:
@@ -182,10 +177,105 @@ def tapas():
     if not os.path.exists(model_path):
         return jsonify({'error': 'Model not found'}), 404
 
+    # Load model bundle and forecast data
     model_bundle = joblib.load(model_path)
-    # Use TAPAS for table QA
-    answer = answer_table_question(query, model_bundle)
-    return jsonify({'answer': answer})
+    last_forecast = model_bundle.get('last_forecast')
+    if not last_forecast:
+        return jsonify({'error': 'No forecast data found. Please run /forecast first.'}), 400
+
+    question = data.get('question')
+    if not question:
+        return jsonify({'error': 'Missing question in request'}), 400
+
+    try:
+        forecast_df = pd.DataFrame(last_forecast)
+
+        # Summarize by store-family-week
+        forecast_df["date"] = pd.to_datetime(forecast_df["date"])
+        forecast_df["week"] = forecast_df["date"].dt.strftime('%Y-W%U')
+
+        forecast_df = forecast_df.astype(str)
+        agg_df = (
+            forecast_df.groupby(["store_nbr", "family", "week"])
+            .agg(total_forecast=("forecast", "sum"))
+            .reset_index()
+            .astype(str)
+        )
+
+        # Limit to 50 rows
+        agg_df = agg_df.head(50)
+        answer = answer_table_question(agg_df, question)
+
+        answer = answer_table_question(forecast_df, question)
+        return jsonify({
+            "question": question,
+            "answer": answer
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/stock_recommendation", methods=["POST"])
+def stock_recommendation():
+    data = request.form if request.form else request.json
+    model_id = data.get("model_id")
+
+    if not model_id:
+        model_id = load_latest_model_id()
+        if not model_id:
+            return jsonify({"error": "No model_id provided and no latest model found"}), 400
+
+    model_path = get_model_path(app.config["MODEL_FOLDER"], model_id)
+    if not os.path.exists(model_path):
+        return jsonify({"error": "Model not found"}), 404
+
+    model_bundle = joblib.load(model_path)
+    forecast = model_bundle.get("last_forecast")
+
+    if not forecast:
+        return jsonify({"error": "No forecast data found. Please run /forecast first."}), 400
+
+    # Load past real sales data (assumed stored during training)
+    last_df_lag = model_bundle.get("last_df_lag")
+    if last_df_lag is None or 'sales' not in last_df_lag.columns:
+        return jsonify({"error": "No historical sales data available"}), 400
+
+    try:
+        forecast_df = pd.DataFrame(forecast)
+        past_df = last_df_lag.copy()
+        past_df["date"] = pd.to_datetime(past_df["date"])
+        forecast_df["date"] = pd.to_datetime(forecast_df["date"])
+
+        recommendations = []
+
+        for (store, family), group in forecast_df.groupby(["store_nbr", "family"]):
+            recent_forecast = group.sort_values("date").tail(7)["forecast"].mean()
+
+            past_sales = past_df[
+                (past_df["store_nbr"] == store) & (past_df["family"] == family)
+            ].sort_values("date").tail(14)
+
+            historical_avg = past_sales["sales"].mean()
+            if historical_avg == 0 or np.isnan(historical_avg):
+                continue
+
+            growth = (recent_forecast - historical_avg) / historical_avg
+            if growth > 0.25:  # 25% growth threshold
+                recommendations.append({
+                    "store_nbr": int(store),
+                    "family": str(family),
+                    "forecast_avg": float(round(recent_forecast, 2)),
+                    "historical_avg": float(round(historical_avg, 2)),
+                    "growth_percent": float(round(growth * 100, 2)),
+                    "restock_recommendation_percent": int(round(growth * 100)),
+                })
+
+        return jsonify({
+            "total_recommendations": len(recommendations),
+            "recommendations": recommendations
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/latest_model', methods=['GET'])
 def latest_model():
