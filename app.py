@@ -6,6 +6,7 @@ import numpy as np
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 from llm_utils import run_secure_qa_on_forecast
+from phi_utils import phi_straight_answer
 
 from model_utils import (
     train_xgboost_model,
@@ -15,7 +16,8 @@ from model_utils import (
     evaluate_model_metrics,
     load_xgboost_pipeline
 )
-from deepseek_utils import answer_prediction_query  # Placeholder for Huggingface/DeepSeek
+# Placeholder for Huggingface/DeepSeek
+from deepseek_utils import answer_prediction_query
 from utils import load_latest_model_id, save_latest_model_id
 from tapas_utils import answer_table_question  # Placeholder for TAPAS
 
@@ -28,6 +30,7 @@ os.makedirs(MODEL_FOLDER, exist_ok=True)
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MODEL_FOLDER'] = MODEL_FOLDER
+
 
 @app.route('/train', methods=['POST'])
 def train():
@@ -42,7 +45,8 @@ def train():
 
     # Save uploaded file
     filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"{uuid.uuid4()}_{filename}")
+    filepath = os.path.join(
+        app.config['UPLOAD_FOLDER'], f"{uuid.uuid4()}_{filename}")
     file.save(filepath)
 
     # Get parameters from form
@@ -100,7 +104,7 @@ def forecast():
     model_id = data.get('model_id')
     n_weeks = int(data.get('n_weeks', 2))
 
-        # If no model_id provided, load latest
+    # If no model_id provided, load latest
     if not model_id:
         model_id = load_latest_model_id()
         if not model_id:
@@ -147,7 +151,7 @@ def deepseek():
 
     if not query:
         return jsonify({'error': 'No query provided'}), 400
-    
+
     # If no model_id provided, load latest
     if not model_id:
         model_id = load_latest_model_id()
@@ -162,6 +166,7 @@ def deepseek():
     # Only allow queries about the prediction
     nlp_answer = answer_prediction_query(query, model_bundle)
     return jsonify({'answer': nlp_answer})
+
 
 @app.route("/tapas", methods=["POST"])
 def tapas():
@@ -214,7 +219,8 @@ def tapas():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
+
 @app.route("/stock_recommendation", methods=["POST"])
 def stock_recommendation():
     data = request.form if request.form else request.json
@@ -249,7 +255,8 @@ def stock_recommendation():
         recommendations = []
 
         for (store, family), group in forecast_df.groupby(["store_nbr", "family"]):
-            recent_forecast = group.sort_values("date").tail(7)["forecast"].mean()
+            recent_forecast = group.sort_values(
+                "date").tail(7)["forecast"].mean()
 
             past_sales = past_df[
                 (past_df["store_nbr"] == store) & (past_df["family"] == family)
@@ -281,12 +288,14 @@ def stock_recommendation():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/qa", methods=["POST"])
 def qa():
     data = request.form if request.form else request.json
     model_id = data.get("model_id")
     question = data.get("question")
-    response_format = data.get("format", "records").lower()  # "summary" or "records"
+    # "summary" or "records"
+    response_format = data.get("format", "records").lower()
 
     if not question:
         return jsonify({"error": "Missing question"}), 400
@@ -336,6 +345,15 @@ def qa():
                     "llm_raw_response": raw_llm
                 })
 
+        # ✅ If user wants straight answer
+        if response_format == "straight":
+            # Just ask Phi for a direct answer, skip DataFrame logic
+            straight_answer = phi_straight_answer(question)
+            return jsonify({
+                "question": question,
+                "answer": straight_answer
+            })
+
         # ✅ If user wants summary
         if response_format == "summary":
             if answer.empty:
@@ -353,7 +371,8 @@ def qa():
                 family = row.get("family", "unknown item")
                 summary_parts.append(f"{family} (Store {store})")
 
-            summary_text = "You should restock " + ", ".join(summary_parts) + " due to high growth."
+            summary_text = "You should restock " + \
+                ", ".join(summary_parts) + " due to high growth."
 
             return jsonify({
                 "question": question,
@@ -372,12 +391,14 @@ def qa():
     except Exception as e:
         return jsonify({"error": f"Secure QA failed: {str(e)}"}), 500
 
+
 @app.route('/latest_model', methods=['GET'])
 def latest_model():
     model_id = load_latest_model_id()
     if not model_id:
         return jsonify({'error': 'No latest model found'}), 404
     return jsonify({'latest_model_id': model_id})
+
 
 if __name__ == '__main__':
     app.run(debug=True)
